@@ -1,24 +1,26 @@
 import numpy as np
+from abc import abstractmethod
+
 R = 8.31446261815324 # Universal gas constant in J/(mol*K)
 
 class CubicEOS:
     def __init__(self, params):
-        self.params:EOSParams = params
+        self.fParams:EOSParams = params
 
     def CalculateAlpha(self, T):
-        self.params.CalculateLambda()
+        self.fParams.CalculateLambda()
         self.fAlpha = []
 
-        for i in range(len(self.params.fomega)):
-            alphaValue = (1 + self.params.fLambda[i] * (1 - (T / self.params.fTc[i]) ** 0.5)) ** 2
+        for i in range(len(self.fParams.fomega)):
+            alphaValue = self.fParams.CalculateAlpha(T, i)
             self.fAlpha.append(alphaValue)
 
     def CalculateA(self, T, i):
-        ac = self.params.fOmegaA * (R * self.params.fTc[i]) ** 2 / self.params.fPc[i]
+        ac = self.fParams.fOmegaA * (R * self.fParams.fTc[i]) ** 2 / self.fParams.fPc[i]
 
-        if self.params.fIsPolar: #* Mathias-Copeman expression
-            Tr = T / self.params.fTc[i]
-            c1, c2, c3 = self.params.fc
+        if self.fParams.fIsPolar: #* Mathias-Copeman expression
+            Tr = T / self.fParams.fTc[i]
+            c1, c2, c3 = self.fParams.fc
             if Tr <= 1.0:
                 return ac * (1 + c1 * (1 - Tr**0.5) + c2 * (1 - Tr**0.5)**2 + c3*(1 - Tr**0.5)**3) ** 2
             else:
@@ -54,6 +56,7 @@ class CubicEOS:
 
     def CalculateKRatios(self, T, P, x):
         self.CalculateAlpha(T)
+        kij = self.CalculateKij(T)
         KRatios = [] #* xl / xg for each component
         phiMat = np.zeros((2, 2)) #* fugacity coefficients for each component in each phase
 
@@ -62,7 +65,7 @@ class CubicEOS:
             bComponent = []
             for iComp in range(2): #* 0 for CO2, 1 for H2O
                 aComponent.append(self.CalculateA(T, iComp))
-                bComponent.append(self.params.fOmegaB * R * self.params.fTc[iComp] / self.params.fPc[iComp])
+                bComponent.append(self.fParams.fOmegaB * R * self.fParams.fTc[iComp] / self.fParams.fPc[iComp])
 
             aProduct = np.array([[aComponent[0], np.sqrt(aComponent[0] * aComponent[1])],
                                     [np.sqrt(aComponent[1] * aComponent[0]), aComponent[1]]])
@@ -90,15 +93,8 @@ class CubicEOS:
         return KRatios
 
     def SolveCubicEOS(self, A, B):
-        #* This function solves the cubic equation of state for Z (compressibility factor)
-        #* Using the Peng-Robinson EOS as an example
-        a = 1
-        b = -(1 - B)
-        c = A - 2 * B - 3 * B ** 2
-        d = -(A * B - B ** 2 - B ** 3)
-
-        #* Coefficients of the cubic equation: Z^3 + b*Z^2 + c*Z + d = 0
-        coeffs = [a, b, c, d]
+        #* Coefficients of the cubic equation: a*Z^3 + b*Z^2 + c*Z + d = 0
+        coeffs = self.fParams.fCoeff(A, B)
         roots = np.roots(coeffs)
 
         #* Return the real root (the one that corresponds to the physical solution)
@@ -108,20 +104,104 @@ class CubicEOS:
 
 class EOSParams:
     def __init__(self, omegaCO2 = 0.228, omegaH2O = 0.344, TcCO2 = 304.19, TcH2O = 647.14, PcCO2 = 7.38e6, PcH2O = 22.064e6):
-        self.fOmegaA = 0.45724 #* EOS parameter for the component
-        self.fOmegaB = 0.077796 #* EOS parameter for the component
+        self.fOmegaA = 0.0 #* EOS parameter for the component
+        self.fOmegaB = 0.0 #* EOS parameter for the component
         self.fomega = [omegaCO2, omegaH2O] #* acentric factor for each component (CO2, H2O in this case)
         self.fTc = [TcCO2, TcH2O] #* critical temperature for each component (CO2, H2O in this case)
         self.fPc = [PcCO2, PcH2O] #* critical pressure for each component (CO2, H2O in this case)
         self.fIsPolar = [False, True] #* indicates if the component is polar (CO2 is non-polar, H2O is polar)
         self.fc = [0.9236, -0.3794, 0.4424]
-        
+        self.fCoeff:callable
+
+    def SetCubicCoeff(self, CoeffFunc):
+        self.fCoeff = CoeffFunc
 
     def CalculateLambda(self):
         self.fLambda = []
 
         for omega in self.fomega:
             lambdaValue = 0.37464 + 1.5423 * omega - 0.26992 * omega ** 2
+            self.fLambda.append(lambdaValue)
+
+    @abstractmethod
+    def CalculateAlpha(self, T, i):
+        raise ValueError("Must be implemented on derived class")
+
+    @abstractmethod
+    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
+        raise ValueError("Must be implemented on derived class")
+
+class PengRobinsonParams(EOSParams):
+    def __init__(self, omegaCO2=0.228, omegaH2O=0.344, TcCO2=304.19, TcH2O=647.14, PcCO2=7380000, PcH2O=22064000):
+        super().__init__(omegaCO2, omegaH2O, TcCO2, TcH2O, PcCO2, PcH2O)
+
+        self.fOmegaA = 0.45724
+        self.fOmegaB = 0.077796
+
+        def PRCoeff(A, B):
+            #* This function solves the cubic equation of state for Z (compressibility factor)
+            #* Using the Peng-Robinson EOS
+            a = 1
+            b = -(1 - B)
+            c = A - 2 * B - 3 * B ** 2
+            d = -(A * B - B ** 2 - B ** 3)
+
+            return [a, b, c, d]
+
+        self.fCoeff = PRCoeff
+
+    def CalculateAlpha(self, T, i):
+        return (1 + self.fParams.fLambda[i] * (1 - (T / self.fParams.fTc[i]) ** 0.5)) ** 2
+
+    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
+        t1 = bComponent[iComp] / bPhase * (Z - 1)
+        t2 = - np.log(Z - BPhase)
+        t31 = - APhase / (2 * np.sqrt(2) * BPhase) * (2 / aPhase * np.sum(np.multiply(aProduct[iComp, :], xProduct[iComp, :]) * (1 - kij)) - bComponent[iComp] / bPhase)
+        t32 = np.log((Z + (1 + np.sqrt(2)) * BPhase) / (Z - (1 - np.sqrt(2)) * BPhase))
+
+        return t1 + t2 + t31 * t32
+
+
+class RedlichKwongParams(EOSParams):
+    def __init__(self, omegaCO2=0.228, omegaH2O=0.344, TcCO2=304.19, TcH2O=647.14, PcCO2=7380000, PcH2O=22064000):
+        super().__init__(omegaCO2, omegaH2O, TcCO2, TcH2O, PcCO2, PcH2O)
+
+        self.fOmegaA = 0.42748
+        self.fOmegaB = 0.08664
+
+
+        def RKCoeff(A, B):
+            #* This function solves the cubic equation of state for Z (compressibility factor)
+            #* Using the Redlich-Kwong EOS
+            a = 1
+            b = -(1 - B)
+            c = A - 2 * B - 3 * B ** 2
+            d = -(A * B - B ** 2 - B ** 3)
+
+            return [a, b, c, d]
+
+        self.fCoeff = RKCoeff
+
+    def CalculateAlpha(self, T, i):
+        return T / self.fParams.fTc[i]
+
+    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
+        t1 = bComponent[iComp] / bPhase * (Z - 1)
+        t2 = - np.log(Z - BPhase)
+        t31 = - APhase / BPhase * (2 / aPhase * np.sum(np.multiply(aProduct[iComp, :], xProduct[iComp, :]) * (1 - kij)) - bComponent[iComp] / bPhase)
+        t32 = np.log((Z + BPhase) / Z)
+
+        return t1 + t2 + t31 * t32
+
+class RedlichKwongSoaveParams(RedlichKwongParams):
+    def CalculateAlpha(self, T, i):
+        return (1 + self.fParams.fLambda[i] * (1 - (T / self.fParams.fTc[i]) ** 0.5)) ** 2
+
+    def CalculateLambda(self):
+        self.fLambda = []
+
+        for omega in self.fomega:
+            lambdaValue = 0.48 + 1.574 * omega - 0.176 * omega ** 2
             self.fLambda.append(lambdaValue)
 
 cubic_eos = CubicEOS(EOSParams())
