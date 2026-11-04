@@ -1,6 +1,5 @@
 import numpy as np
 
-
 ECO2, EH2O, ENaCl = range(3)
 
 def debug_stop(message="Numerical validation failed"):
@@ -83,9 +82,7 @@ class Component:
         Val = np.asarray(Val, dtype=float)
 
         if self.fIsInverse:
-            a = 1.0 + self.fK0 * np.dot(
-                self.fDK0, Val[:2] - self.fRefVals
-            )
+            a = 1.0 + self.fK0 * np.dot(self.fDK0, Val[:2] - self.fRefVals)
             if abs(a) < 1e-30:
                 debug_stop("Singular denominator in ComputeDK")
             self.fDK = -(self.fK0**2) * self.fDK0 / (a**2)
@@ -280,9 +277,7 @@ class Compositional_H2O_CO2_NaCl:
             try:
                 correction = np.linalg.solve(A, R)
             except np.linalg.LinAlgError as exc:
-                raise RuntimeError(
-                    "Singular matrix in ComputeMolarFractions"
-                ) from exc
+                raise RuntimeError("Singular matrix in ComputeMolarFractions") from exc
 
             self.SetX(self.GetX() + correction)
         else:
