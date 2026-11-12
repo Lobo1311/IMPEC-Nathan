@@ -1,5 +1,7 @@
 import numpy as np
 
+from EOS import *
+
 ECO2, EH2O, ENaCl = range(3)
 
 def debug_stop(message="Numerical validation failed"):
@@ -143,6 +145,9 @@ class Compositional_H2O_CO2_NaCl:
         self.fP = 0.0
         self.fT = 0.0
 
+        self.fEOS = CubicEOS(PengRobinsonParams())
+        self.SetX([0.0, 1.0, 1.0, 0.0, 0.0, 1.0])
+
     def GetComponent(self, ComponentIdx):
         components = {
             ECO2: self.fCO2,
@@ -248,14 +253,14 @@ class Compositional_H2O_CO2_NaCl:
         A[1, [1, 3]] = 1.0
         A[2, 5] = 1.0
 
-        A[3, 0] = 1.0
-        A[3, 1] = -self.fCO2.fK
+        A[3, 0] = -self.fCO2.fK
+        A[3, 1] = 1.0
 
-        A[4, 2] = 1.0
-        A[4, 3] = -self.fH2O.fK
+        A[4, 2] = -self.fH2O.fK
+        A[4, 3] = 1.0
 
-        A[5, 4] = 1.0
-        A[5, 5] = -self.fNaCl.fK
+        A[5, 4] = -self.fNaCl.fK
+        A[5, 5] = 1.0
 
         def residual():
             xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls = self.GetX()
@@ -264,9 +269,9 @@ class Compositional_H2O_CO2_NaCl:
                 1.0 - xCO2l - xH2Ol - xNaCll,
                 1.0 - xCO2g - xH2Og,
                 1.0 - xNaCls,
-                self.fCO2.fK * xCO2g - xCO2l,
-                self.fH2O.fK * xH2Og - xH2Ol,
-                self.fNaCl.fK * xNaCls - xNaCll,
+                self.fCO2.fK * xCO2l - xCO2g,
+                self.fH2O.fK * xH2Ol - xH2Og,
+                self.fNaCl.fK * xNaCll - xNaCls,
             ])
 
         for _ in range(maxIter):
@@ -315,15 +320,11 @@ class Compositional_H2O_CO2_NaCl:
         try:
             D = np.linalg.solve(A, Z)
         except np.linalg.LinAlgError as exc:
-            raise RuntimeError(
-                "Singular matrix in ComputeMolarDensityFractions"
-            ) from exc
+            raise RuntimeError("Singular matrix in ComputeMolarDensityFractions") from exc
 
         self.SetD(D)
 
-        for phase in (
-            self.fLiquidPhase, self.fGasPhase, self.fSolidPhase
-        ):
+        for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
             phase.ValidateD()
 
         # Derivatives with respect to P and T.
@@ -498,12 +499,40 @@ class Compositional_H2O_CO2_NaCl:
     def PrintMolarDensity(self):
         print("Total molar density:", self.frhoMT)
 
-    def Flash(z, p_pa, T_k):
-        pass
-
     def FlashCalculation(self, P, T, zCO2, zH2O, zNaCl):
         self.LoadState(P, T)
+        self.LoadK()
         self.SetZ(zCO2, zH2O, zNaCl)
         self.ComputeMolarFractions()
         self.ComputeMolarDensityFractions()
         self.ComputeSaturationsAndTotalMolarDensity()
+
+    def CalculateKAndDerivatives(self, dP=1000.0, dT=0.1):
+        def CalculateK(P, T):
+            return np.array(self.fEOS.CalculateKRatios(P, T, self.GetX()))
+
+        K = CalculateK(self.fP, self.fT)
+
+        KP_plus = CalculateK(self.fP + dP, self.fT)
+        KP_minus = CalculateK(self.fP - dP, self.fT)
+
+        KT_plus = CalculateK(self.fP, self.fT + dT)
+        KT_minus = CalculateK(self.fP, self.fT - dT)
+
+        dKdP = (KP_plus - KP_minus) / (2 * dP)
+        dKdT = (KT_plus - KT_minus) / (2 * dT)
+
+        GradK = np.column_stack((dKdP, dKdT))
+
+        return K, GradK
+
+    def LoadK(self):
+        K, gradK = self.CalculateKAndDerivatives()
+
+        GradKCO2 = np.array(gradK[0])
+        GradKH2O = np.array(gradK[1])
+        GradKNaCl = np.array([0.0, 0.0])
+
+        self.fCO2.SetK(K[0], GradKCO2, False)
+        self.fH2O.SetK(K[1], GradKH2O, True)
+        self.fNaCl.SetK(1e30, GradKNaCl, False)

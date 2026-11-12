@@ -26,6 +26,8 @@ import sys
 import csv
 import numpy as np
 
+from flashCalcClasses import Compositional_H2O_CO2_NaCl
+
 # =====================================================================
 # 0.  Constants
 # =====================================================================
@@ -187,7 +189,11 @@ def spycher_pruess_eq(p_pa, T_k, par):
 # 4.  Flash and phase densities
 # =====================================================================
 
+compositional = Compositional_H2O_CO2_NaCl()
+compositional.SetRhoM(500.0, 30000.0, 1000.0)
+
 def flash(z, p_pa, T_k, par, eq=None):
+    raise NotImplementedError("flash function should not be called. Use Compositional_H2O_CO2_NaCl class methods instead.")
     """Two-component flash at fixed (p, T).
 
     Because the equilibrium compositions depend only on (p, T), the phase
@@ -282,10 +288,12 @@ def relperm(Sw, Sg, par):
 def cell_state(p, N, par, eq=None):
     NT = N.sum()
     z = N[ICO2] / NT
-    V, Sl, Sg, x_l, x_g, rho_l, rho_g = flash(z, p, par.T_K, par, eq)
-    Vt = V * NT / rho_g + (1.0 - V) * NT / rho_l
-    return dict(V=V, Sl=Sl, Sg=Sg, x_l=x_l, x_g=x_g,
-                rho_l=rho_l, rho_g=rho_g, Vt=Vt, z=z)
+    compositional.FlashCalculation(p, par.T_K, z, 1.0 - z, 0.0)
+    #V, Sl, Sg, x_l, x_g, rho_l, rho_g = flash(z, p, par.T_K, par, eq)
+    #Vt = V * NT / rho_g + (1.0 - V) * NT / rho_l
+    Vt = compositional.fGasPhase.fD * NT / compositional.fGasPhase.fRhoM + (1.0 - compositional.fGasPhase.fD) * NT / compositional.fLiquidPhase.fRhoM
+    return dict(V=compositional.fGasPhase.fD, Sl=compositional.fLiquidPhase.fS, Sg=compositional.fGasPhase.fS, x_l=compositional.fLiquidPhase.fX, x_g=compositional.fGasPhase.fX,
+                rho_l=compositional.fLiquidPhase.fRhoM, rho_g=compositional.fGasPhase.fRhoM, Vt=Vt, z=z)
 
 
 def Vt_of(p, N, par, eq=None):
@@ -342,8 +350,9 @@ class Simulator:
         self.p = np.full(n, par.p_res)
         self.N = np.zeros((n, NC))
 
-        st0 = flash(1e-12, par.p_res, par.T_K, par)
-        self.N[:, IH2O] = par.phi * st0[5]          # rho_l_molar at z ~ 0
+        #st0 = flash(1e-12, par.p_res, par.T_K, par)
+        compositional.FlashCalculation(par.p_res, par.T_K, 1e-12, 1.0 - 1e-12, 0.0)
+        self.N[:, IH2O] = par.phi * compositional.fLiquidPhase.fRhoM          # rho_l_molar at z ~ 0
         self.N[:, ICO2] = 0.0
 
         self.T_int = par.perm * par.area / par.dx
