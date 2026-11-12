@@ -1,20 +1,51 @@
 import numpy as np
 
 from flashCalcClasses import ECO2, EH2O, ENaCl, Compositional_H2O_CO2_NaCl
+from EOS import *
+
+def CalculateKAndDerivatives(EOS, P, T, x, dP=1000.0, dT=0.1):
+
+    def CalculateK(P, T):
+        return np.array(EOS.CalculateKRatios(P, T, x))
+
+    K = CalculateK(P, T)
+
+    KP_plus = CalculateK(P + dP, T)
+    KP_minus = CalculateK(P - dP, T)
+
+    KT_plus = CalculateK(P, T + dT)
+    KT_minus = CalculateK(P, T - dT)
+
+    dKdP = (KP_plus - KP_minus) / (2 * dP)
+    dKdT = (KT_plus - KT_minus) / (2 * dT)
+
+    GradK = np.column_stack((dKdP, dKdT))
+
+    return K, GradK
 
 def main():
     compositional = Compositional_H2O_CO2_NaCl()
+    param = PengRobinsonParams()
+    EOS = CubicEOS(param)
 
-    GradKCO2 = np.array([1.0, 0.0])
-    GradKH2O = np.array([-1.0, 0.05])
-    GradKNaCl = np.array([0.000002, 0.0005])
+    Val = np.array([1e6, 300.0, 0.4, 0.4, 0.2])
+    DeltaVal = np.array([1000.0, 10.0, 0.04, -0.03, -0.01])
+
+    #* CO2 L, CO2 G, H2O L, H2O G, NaCl L, NaCl S
+    compositional.SetX([0.05, 0.90, 0.95, 0.10, 0.0, 1.0])
+
+    K, gradK = CalculateKAndDerivatives(EOS, Val[0], Val[1], compositional.GetX())
+
+    GradKCO2 = np.array(gradK[0])
+    GradKH2O = np.array(gradK[1])
+    GradKNaCl = np.array([0.0, 0.0])
 
     CO2 = compositional.GetComponent(ECO2)
     H2O = compositional.GetComponent(EH2O)
     NaCl = compositional.GetComponent(ENaCl)
 
-    CO2.SetK(1.0e-4, GradKCO2, True)
-    H2O.SetK(1.0e4, GradKH2O, False)
+    CO2.SetK(K[0], GradKCO2, False)
+    H2O.SetK(K[1], GradKH2O, True)
     NaCl.SetK(0.0, GradKNaCl, False)
 
     RefVals = np.array([1.0e6, 300.0])
@@ -25,9 +56,6 @@ def main():
 
     compositional.SetZ(0.4, 0.5, 0.1)
     compositional.SetRhoM(1600.0, 1000.0, 2000.0)
-
-    Val = np.array([1e6, 300.0, 0.4, 0.4, 0.2])
-    DeltaVal = np.array([1000.0, 10.0, 0.04, -0.03, -0.01])
 
     # Validate K derivatives.
     CO2.ValidateKDerivative(Val, DeltaVal)

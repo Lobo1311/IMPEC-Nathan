@@ -497,3 +497,13 @@ class Compositional_H2O_CO2_NaCl:
 
     def PrintMolarDensity(self):
         print("Total molar density:", self.frhoMT)
+
+    def Flash(z, p_pa, T_k):
+        pass
+
+    def FlashCalculation(self, P, T, zCO2, zH2O, zNaCl):
+        self.LoadState(P, T)
+        self.SetZ(zCO2, zH2O, zNaCl)
+        self.ComputeMolarFractions()
+        self.ComputeMolarDensityFractions()
+        self.ComputeSaturationsAndTotalMolarDensity()

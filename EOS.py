@@ -1,5 +1,5 @@
 import numpy as np
-from abc import abstractmethod
+from abc import abstractmethod, ABC
 
 R = 8.31446261815324 # Universal gas constant in J/(mol*K)
 
@@ -16,8 +16,7 @@ class CubicEOS:
             self.fAlpha.append(alphaValue)
 
     def CalculateA(self, T, i):
-        self.CalculateAlpha(T)
-        ac = self.fParams.fOmegaA * (R * self.fParams.fTc[i]) ** 2 / self.fParams.fPc[i]
+        ac = self.fParams.fOmegaA * R ** 2 * self.fParams.fTc[i] ** self.fParams.fTemperatureExp / self.fParams.fPc[i]
 
         if self.fParams.fIsPolar[i]: #* Mathias-Copeman expression
             Tr = T / self.fParams.fTc[i]
@@ -30,7 +29,7 @@ class CubicEOS:
             return ac * self.fAlpha[i]
 
     def CalculateKij(self, T): #* binary interaction parameter
-        return np.zeros((2, 2)) 
+        # return np.zeros((2, 2)) 
         if T < 278 or T > 623:
             raise ValueError("Temperature is out of the valid range for kij calculation (278 K to 623 K).")
 
@@ -45,23 +44,12 @@ class CubicEOS:
 
         return np.array([[0, val], [val, 0]])
 
-    def PlotKij(self):
-        T_values = np.linspace(278, 623, 100)
-        kij_values = [self.CalculateKij(T) for T in T_values]
-
-        import matplotlib.pyplot as plt
-        plt.plot(T_values, kij_values)
-        plt.xlabel('Temperature (K)')
-        plt.ylabel('Binary Interaction Parameter (kij)')
-        plt.title('Binary Interaction Parameter vs Temperature')
-        plt.grid()
-        plt.show()
-
-    def CalculateKRatios(self, T, P, x):
+    def CalculateKRatios(self, P, T, x):
+        self.CalculateAlpha(T)
         kij = self.CalculateKij(T)
         KRatios = [] #* xl / xg for each component
         phiMat = np.zeros((2, 2)) #* fugacity coefficients for each component in each phase
-        xMat = np.array([[x[0], x[1]], [x[2], x[3]]]) #* mole fractions for each component in each phase
+        xMat = np.array([[x[0], x[2]], [x[1], x[3]]]) #* mole fractions for each component in each phase
         ZVec = np.zeros(2) #* compressibility factors for each phase
         aVec = np.zeros(2)
         bVec = np.zeros(2)
@@ -86,7 +74,7 @@ class CubicEOS:
             aVec[iPhase] = aPhase
             bVec[iPhase] = bPhase
 
-            APhase = aPhase * P / (R * T) ** 2
+            APhase = aPhase * P / (R ** 2 * T ** self.fParams.fTemperatureExp)
             BPhase = bPhase * P / (R * T)
 
             AVec[iPhase] = APhase
@@ -98,17 +86,12 @@ class CubicEOS:
 
         for iPhase in range(2):
             for iComp in range(2):
-                t1 = bComponent[iComp] / bVec[iPhase] * (ZVec[iPhase] - 1)
-                t2 = - np.log(ZVec[iPhase] - BVec[iPhase])
-                t3 = - AVec[iPhase] / (2 * np.sqrt(2) * BVec[iPhase]) * (2 / aVec[iPhase] * np.sum(aProduct[iComp] * xMat[iPhase] * (1 - kij[iComp])) - bComponent[iComp] / bVec[iPhase])
-                t4 = np.log((ZVec[iPhase] + (1 + np.sqrt(2)) * BVec[iPhase]) / (ZVec[iPhase] - (1 - np.sqrt(2)) * BVec[iPhase]))
-                lnphi = t1 + t2 + t3 * t4
-
+                lnphi = self.fParams.CalculateLnPhi(iComp, iPhase, kij, AVec, BVec, aVec, bVec, bComponent, aProduct, xMat, ZVec)
                 phi = np.exp(lnphi)
                 phiMat[iPhase, iComp] = phi
             
         for i in range(2):
-            KRatios.append(phiMat[1, i] / phiMat[0, i])
+            KRatios.append(phiMat[0, i] / phiMat[1, i])
 
         return KRatios
 
@@ -119,26 +102,22 @@ class CubicEOS:
 
         #* Return the real root (the one that corresponds to the physical solution)
         real_roots = roots[np.isreal(roots)].real
+        possible_roots = real_roots[real_roots > B]
 
-        if len(real_roots) == 0:
-            raise ValueError("No real roots found for the cubic equation of state.") 
+        if len(possible_roots) == 0:
+            raise ValueError("No valid real roots found for the cubic equation of state.") 
 
         if (i == 0):  #* For liquid phase, return the smallest possible real root
-            possible_roots = real_roots[real_roots > B]
-
-            if len(possible_roots) == 0:
-                raise ValueError("No valid real roots found for the liquid phase.")
-
             return min(possible_roots)
         
         elif (i == 1):  #* For gas phase, return the largest possible real root
-            return max(real_roots)
+            return max(possible_roots)
 
         else:
             raise ValueError("Invalid phase index. Use 0 for liquid and 1 for gas.")
 
 
-class EOSParams:
+class EOSParams(ABC):
     def __init__(self, omegaCO2 = 0.228, omegaH2O = 0.344, TcCO2 = 304.19, TcH2O = 647.14, PcCO2 = 7.38e6, PcH2O = 22.064e6):
         self.fOmegaA = 0.0 #* EOS parameter for the component
         self.fOmegaB = 0.0 #* EOS parameter for the component
@@ -147,6 +126,7 @@ class EOSParams:
         self.fPc = [PcCO2, PcH2O] #* critical pressure for each component (CO2, H2O in this case)
         self.fIsPolar = [False, True] #* indicates if the component is polar (CO2 is non-polar, H2O is polar)
         self.fc = [0.9236, -0.3794, 0.4424]
+        self.fTemperatureExp = 2.0
         self.fCoeff:callable
 
     def SetCubicCoeff(self, CoeffFunc):
@@ -164,7 +144,7 @@ class EOSParams:
         raise ValueError("Must be implemented on derived class")
 
     @abstractmethod
-    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
+    def CalculateLnPhi(self, iComp, iPhase, kij, AVec, BVec, aVec, bVec, bComponent, aProduct, xMat, ZVec):
         raise ValueError("Must be implemented on derived class")
 
 class PengRobinsonParams(EOSParams):
@@ -189,30 +169,29 @@ class PengRobinsonParams(EOSParams):
     def CalculateAlpha(self, T, i):
         return (1 + self.fLambda[i] * (1 - (T / self.fTc[i]) ** 0.5)) ** 2
 
-    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
-        t1 = bComponent[iComp] / bPhase * (Z - 1)
-        t2 = - np.log(Z - BPhase)
-        t31 = - APhase / (2 * np.sqrt(2) * BPhase) * (2 / aPhase * np.sum(np.multiply(aProduct[iComp, :], xProduct[iComp, :]) * (1 - kij)) - bComponent[iComp] / bPhase)
-        t32 = np.log((Z + (1 + np.sqrt(2)) * BPhase) / (Z - (1 - np.sqrt(2)) * BPhase))
+    def CalculateLnPhi(self, iComp, iPhase, kij, AVec, BVec, aVec, bVec, bComponent, aProduct, xMat, ZVec):
+        t1 = bComponent[iComp] / bVec[iPhase] * (ZVec[iPhase] - 1)
+        t2 = - np.log(ZVec[iPhase] - BVec[iPhase])
+        t31 = - AVec[iPhase] / (2 * np.sqrt(2) * BVec[iPhase]) * (2 / aVec[iPhase] * np.sum(aProduct[iComp] * xMat[iPhase] * (1 - kij[iComp])) - bComponent[iComp] / bVec[iPhase])
+        t32 = np.log((ZVec[iPhase] + (1 + np.sqrt(2)) * BVec[iPhase]) / (ZVec[iPhase] + (1 - np.sqrt(2)) * BVec[iPhase]))
 
         return t1 + t2 + t31 * t32
 
 
-class RedlichKwongParams(EOSParams):
+class ModRedlichKwongParams(EOSParams):
     def __init__(self, omegaCO2=0.228, omegaH2O=0.344, TcCO2=304.19, TcH2O=647.14, PcCO2=7380000, PcH2O=22064000):
         super().__init__(omegaCO2, omegaH2O, TcCO2, TcH2O, PcCO2, PcH2O)
 
         self.fOmegaA = 0.42748
         self.fOmegaB = 0.08664
 
-
         def RKCoeff(A, B):
             #* This function solves the cubic equation of state for Z (compressibility factor)
             #* Using the Redlich-Kwong EOS
             a = 1
-            b = -(1 - B)
-            c = A - 2 * B - 3 * B ** 2
-            d = -(A * B - B ** 2 - B ** 3)
+            b = -1
+            c = A - B - B ** 2
+            d = -A * B
 
             return [a, b, c, d]
 
@@ -221,15 +200,27 @@ class RedlichKwongParams(EOSParams):
     def CalculateAlpha(self, T, i):
         return T / self.fTc[i]
 
-    def CalculateLnPhi(self, iComp, kij, APhase, BPhase, aPhase, bPhase, bComponent, aProduct, xProduct, Z):
-        t1 = bComponent[iComp] / bPhase * (Z - 1)
-        t2 = - np.log(Z - BPhase)
-        t31 = - APhase / BPhase * (2 / aPhase * np.sum(np.multiply(aProduct[iComp, :], xProduct[iComp, :]) * (1 - kij)) - bComponent[iComp] / bPhase)
-        t32 = np.log((Z + BPhase) / Z)
+    def CalculateLnPhi(self, iComp, iPhase, kij, AVec, BVec, aVec, bVec, bComponent, aProduct, xMat, ZVec):
+        t1 = bComponent[iComp] / bVec[iPhase] * (ZVec[iPhase] - 1)
+        t2 = - np.log(ZVec[iPhase] - BVec[iPhase])
+        t31 = - AVec[iPhase] / BVec[iPhase] * (2 / aVec[iPhase] * np.sum(aProduct[iComp] * xMat[iPhase] * (1 - kij[iComp])) - bComponent[iComp] / bVec[iPhase])
+        t32 = np.log((ZVec[iPhase] + BVec[iPhase]) / ZVec[iPhase])
 
         return t1 + t2 + t31 * t32
 
-class RedlichKwongSoaveParams(RedlichKwongParams):
+class RedlichKwongParamsV2(ModRedlichKwongParams):
+    def __init__(self, omegaCO2=0.228, omegaH2O=0.344, TcCO2=304.19, TcH2O=647.14, PcCO2=7380000, PcH2O=22064000):
+        super().__init__(omegaCO2, omegaH2O, TcCO2, TcH2O, PcCO2, PcH2O)
+
+        self.fTemperatureExp = 2.5
+
+    def CalculateAlpha(self, T, i):
+        return (self.fTc[i] / T)**0.5
+
+class RedlichKwongSoaveParams(ModRedlichKwongParams):
+    def __init__(self, omegaCO2=0.228, omegaH2O=0.344, TcCO2=304.19, TcH2O=647.14, PcCO2=7380000, PcH2O=22064000):
+        super().__init__(omegaCO2, omegaH2O, TcCO2, TcH2O, PcCO2, PcH2O)
+
     def CalculateAlpha(self, T, i):
         return (1 + self.fLambda[i] * (1 - (T / self.fTc[i]) ** 0.5)) ** 2
 
@@ -240,17 +231,12 @@ class RedlichKwongSoaveParams(RedlichKwongParams):
             lambdaValue = 0.48 + 1.574 * omega - 0.176 * omega ** 2
             self.fLambda.append(lambdaValue)
 
-params = [PengRobinsonParams(), RedlichKwongParams(), RedlichKwongSoaveParams()]
-
-from impecmrst import spycher_pruess_eq, Params
+params = [PengRobinsonParams(), ModRedlichKwongParams(), RedlichKwongSoaveParams(), RedlichKwongParamsV2()]
 
 P = 1e6  # Pressure in Pa
 T = 300  # Temperature in K
 
 for param in params:
     eos = CubicEOS(param)
-    kRatios = eos.CalculateKRatios(T, P, [0.05, 0.95, 0.9, 0.1])
+    kRatios = eos.CalculateKRatios(P, T, [0.05, 0.95, 0.9, 0.1])
     print(f"K Ratios for {param.__class__.__name__}: {kRatios}")
-
-paramsMRST = Params()
-print(spycher_pruess_eq(P, T, paramsMRST))
