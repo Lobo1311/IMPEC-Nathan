@@ -120,7 +120,8 @@ def Run():
 def ComparingSpycherPruess():
     from impecmrst import flash, spycher_pruess_eq, Params
     params = Params()
-    z_co2 = 1e-12
+    #z_co2 = 1e-12
+    z_co2 = 0.4
     z_h2o = 1.0 - z_co2
     z_nacl = 0.0
     V_impec, Sl_impec, Sg_impec, x_l_co2_impec, x_g_co2_impec, rho_l_molar_impec, rho_g_molar_impec = flash(z_co2, params.p_res, params.T_K, params)

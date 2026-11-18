@@ -290,9 +290,9 @@ def cell_state(p, N, par, eq=None):
     compositional.FlashCalculation(p, par.T_K, z, 1.0 - z, 0.0)
     #V, Sl, Sg, x_l, x_g, rho_l, rho_g = flash(z, p, par.T_K, par, eq)
     #Vt = V * NT / rho_g + (1.0 - V) * NT / rho_l
-    Vt = compositional.fGasPhase.fD * NT / compositional.fGasPhase.fRhoM + (1.0 - compositional.fGasPhase.fD) * NT / compositional.fLiquidPhase.fRhoM
-    return dict(V=compositional.fGasPhase.fD, Sl=compositional.fLiquidPhase.fS, Sg=compositional.fGasPhase.fS, x_l=compositional.fLiquidPhase.fX, x_g=compositional.fGasPhase.fX,
-                rho_l=compositional.fLiquidPhase.fRhoM, rho_g=compositional.fGasPhase.fRhoM, Vt=Vt, z=z)
+    Vt = compositional.fGasPhase.fD * NT / compositional.fGasPhase.frhoM + (1.0 - compositional.fGasPhase.fD) * NT / compositional.fLiquidPhase.frhoM
+    return dict(V=compositional.fGasPhase.fD, Sl=compositional.fLiquidPhase.fS, Sg=compositional.fGasPhase.fS, x_l=compositional.fCO2.fx[0], x_g=compositional.fCO2.fx[1],
+                rho_l=compositional.fLiquidPhase.frhoM, rho_g=compositional.fGasPhase.frhoM, Vt=Vt, z=z)
 
 
 def Vt_of(p, N, par, eq=None):
@@ -351,7 +351,7 @@ class Simulator:
 
         #st0 = flash(1e-12, par.p_res, par.T_K, par)
         compositional.FlashCalculation(par.p_res, par.T_K, 1e-12, 1.0 - 1e-12, 0.0)
-        self.N[:, IH2O] = par.phi * compositional.fLiquidPhase.fRhoM          # rho_l_molar at z ~ 0
+        self.N[:, IH2O] = par.phi * compositional.fLiquidPhase.frhoM          # rho_l_molar at z ~ 0
         self.N[:, ICO2] = 0.0
 
         self.T_int = par.perm * par.area / par.dx

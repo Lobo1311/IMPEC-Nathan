@@ -344,11 +344,15 @@ class Compositional_H2O_CO2_NaCl:
             debug_stop("ComputeMolarDensityFractions did not converge")
 
         if self.fCO2.fz <= self.fCO2.fx[0]:                       # single aqueous phase
-            self.fGasPhase.fD, self.fLiquidPhase.fD = 0.0, 1.0
+            self.fLiquidPhase.fD, self.fGasPhase.fD, self.fSolidPhase.fD = 1.0, 0.0, 0.0
             self.SetX([self.fCO2.fz, self.fCO2.fx[1], 1.0 - self.fCO2.fz, 1.0 - self.fCO2.fx[1], 0.0, 1.0])
         elif self.fCO2.fz >= self.fCO2.fx[1]:                     # single CO2-rich phase
-            self.fGasPhase.fD, self.fLiquidPhase.fD = 1.0, 0.0
+            self.fGasPhase.fD, self.fLiquidPhase.fD, self.fSolidPhase.fD = 1.0, 0.0, 0.0
             self.SetX([self.fCO2.fx[0], self.fCO2.fz, 1.0 - self.fCO2.fx[0], 1.0 - self.fCO2.fz, 0.0, 1.0])
+
+        if self.fSolidPhase.fD < 0.0:
+            self.fSolidPhase.fD = 0.0
+            self.fLiquidPhase.fD = 1.0 - self.fGasPhase.fD
 
         for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
             phase.ValidateD()
@@ -409,6 +413,16 @@ class Compositional_H2O_CO2_NaCl:
                 raise RuntimeError("Singular matrix in ComputeSaturationsAndTotalMolarDensity") from exc
 
             self.SetSRhoM(self.GetSRhoM() + correction)
+
+        if -1e-6 < self.fLiquidPhase.fS < 0.0:
+            self.fLiquidPhase.fS = 0.0
+            self.fGasPhase.fS = 1.0 - self.fSolidPhase.fS
+        elif -1e-6 < self.fGasPhase.fS < 0.0:
+            self.fGasPhase.fS = 0.0
+            self.fLiquidPhase.fS = 1.0 - self.fSolidPhase.fS
+        elif -1e-6 < self.fSolidPhase.fS < 0.0:
+            self.fSolidPhase.fS = 0.0
+            self.fLiquidPhase.fS = 1.0 - self.fGasPhase.fS
 
         for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
             phase.ValidateS()
