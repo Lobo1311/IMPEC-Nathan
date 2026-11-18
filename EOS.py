@@ -230,13 +230,3 @@ class RedlichKwongSoaveParams(ModRedlichKwongParams):
         for omega in self.fomega:
             lambdaValue = 0.48 + 1.574 * omega - 0.176 * omega ** 2
             self.fLambda.append(lambdaValue)
-
-params = [PengRobinsonParams(), ModRedlichKwongParams(), RedlichKwongSoaveParams(), RedlichKwongParamsV2()]
-
-P = 1e6  # Pressure in Pa
-T = 300  # Temperature in K
-
-for param in params:
-    eos = CubicEOS(param)
-    kRatios = eos.CalculateKRatios(P, T, [0.05, 0.95, 0.9, 0.1])
-    print(f"K Ratios for {param.__class__.__name__}: {kRatios}")

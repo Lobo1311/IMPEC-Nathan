@@ -228,6 +228,12 @@ class Compositional_H2O_CO2_NaCl:
             self.frhoMT,
         ])
 
+    def SetSRhoM(self, Val):
+        self.fLiquidPhase.fS = Val[0]
+        self.fGasPhase.fS = Val[1]
+        self.fSolidPhase.fS = Val[2]
+        self.frhoMT = Val[3]
+
     def GetDSRhoM(self):
         return np.vstack([
             self.fLiquidPhase.fDS,
@@ -246,32 +252,32 @@ class Compositional_H2O_CO2_NaCl:
         self.fNaCl.ComputeK(PT)
 
     def ComputeMolarFractions(self, maxIter=1000, tol=1e-10):
-        # Unknowns: xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls.
+        #* xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls
         A = np.zeros((6, 6))
 
-        A[0, [0, 2, 4]] = 1.0
-        A[1, [1, 3]] = 1.0
-        A[2, 5] = 1.0
+        A[0, 0] = self.fCO2.fK
+        A[0, 1] = -1.0
 
-        A[3, 0] = -self.fCO2.fK
-        A[3, 1] = 1.0
+        A[1, 2] = self.fH2O.fK
+        A[1, 3] = -1.0
 
-        A[4, 2] = -self.fH2O.fK
-        A[4, 3] = 1.0
+        A[2, 4] = self.fNaCl.fK
+        A[2, 5] = -1.0
 
-        A[5, 4] = -self.fNaCl.fK
+        A[3, [0, 2, 4]] = 1.0
+        A[4, [1, 3]] = 1.0
         A[5, 5] = 1.0
 
         def residual():
             xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls = self.GetX()
 
             return np.array([
-                1.0 - xCO2l - xH2Ol - xNaCll,
-                1.0 - xCO2g - xH2Og,
-                1.0 - xNaCls,
                 self.fCO2.fK * xCO2l - xCO2g,
                 self.fH2O.fK * xH2Ol - xH2Og,
                 self.fNaCl.fK * xNaCll - xNaCls,
+                xCO2l + xH2Ol + xNaCll - 1.0,
+                xCO2g + xH2Og - 1.0,
+                xNaCls - 1.0,
             ])
 
         for _ in range(maxIter):
@@ -280,7 +286,7 @@ class Compositional_H2O_CO2_NaCl:
                 break
 
             try:
-                correction = np.linalg.solve(A, R)
+                correction = np.linalg.solve(A, -R)
             except np.linalg.LinAlgError as exc:
                 raise RuntimeError("Singular matrix in ComputeMolarFractions") from exc
 
@@ -294,40 +300,61 @@ class Compositional_H2O_CO2_NaCl:
         # Derivatives with respect to pressure and temperature.
         for i in range(2):
             DTanMat = np.zeros((6, 6))
-            DTanMat[3, 1] = self.fCO2.fDK[i]
-            DTanMat[4, 3] = self.fH2O.fDK[i]
-            DTanMat[5, 5] = self.fNaCl.fDK[i]
+            DTanMat[0, 0] = self.fCO2.fDK[i]
+            DTanMat[1, 2] = self.fH2O.fDK[i]
+            DTanMat[2, 4] = self.fNaCl.fDK[i]
 
             Result = DTanMat @ self.GetX()
-            Result = np.linalg.solve(A, Result)
+            Result = np.linalg.solve(A, -Result)
             self.SetDX(i, Result)
 
-    def ComputeMolarDensityFractions(self):
-        # Solve for Dl, Dg, Ds.
+    def ComputeMolarDensityFractions(self, maxIter=1000, tol=1e-10):
+        #* Dl, Dg, Ds
         xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls = self.GetX()
 
-        zCO2 = self.fCO2.fz
-        zH2O = self.fH2O.fz
-        zNaCl = self.fNaCl.fz
-
-        A = np.eye(3)
+        A = np.zeros((3, 3))
         A[0, :] = [xCO2l, xCO2g, 0.0]
         A[1, :] = [xH2Ol, xH2Og, 0.0]
         A[2, :] = [xNaCll, 0.0, xNaCls]
 
-        Z = np.array([zCO2, zH2O, zNaCl])
+        def residual():
+            Dl, Dg, Ds = self.GetD()
+            zCO2 = self.fCO2.fz
+            zH2O = self.fH2O.fz
+            zNaCl = self.fNaCl.fz
 
-        try:
-            D = np.linalg.solve(A, Z)
-        except np.linalg.LinAlgError as exc:
-            raise RuntimeError("Singular matrix in ComputeMolarDensityFractions") from exc
+            return np.array([
+                Dg * xCO2g + Dl * xCO2l - zCO2,
+                Dg * xH2Og + Dl * xH2Ol - zH2O,
+                Ds * xNaCls + Dl * xNaCll - zNaCl,
+            ])
 
-        self.SetD(D)
+        for _ in range(maxIter):
+            R = residual()
+            if norm(R) < tol:
+                break
+
+            try:
+                correction = np.linalg.solve(A, -R)
+            except np.linalg.LinAlgError as exc:
+                raise RuntimeError("Singular matrix in ComputeMolarDensityFractions") from exc
+
+            self.SetD(self.GetD() + correction)
+        else:
+            debug_stop("ComputeMolarDensityFractions did not converge")
+
+        if self.fCO2.fz <= self.fCO2.fx[0]:                       # single aqueous phase
+            self.fGasPhase.fD, self.fLiquidPhase.fD = 0.0, 1.0
+            self.SetX([self.fCO2.fz, self.fCO2.fx[1], 1.0 - self.fCO2.fz, 1.0 - self.fCO2.fx[1], 0.0, 1.0])
+        elif self.fCO2.fz >= self.fCO2.fx[1]:                     # single CO2-rich phase
+            self.fGasPhase.fD, self.fLiquidPhase.fD = 1.0, 0.0
+            self.SetX([self.fCO2.fx[0], self.fCO2.fz, 1.0 - self.fCO2.fx[0], 1.0 - self.fCO2.fz, 0.0, 1.0])
 
         for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
             phase.ValidateD()
 
         # Derivatives with respect to P and T.
+        D = self.GetD()
         for i in range(2):
             DTanMat = np.zeros((3, 3))
             DTanMat[0, 0] = self.fCO2.fDx[0, i]
@@ -345,58 +372,67 @@ class Compositional_H2O_CO2_NaCl:
         for i in range(3):
             self.SetDD(i + 2, inverseA[:, i])
 
-    def ComputeSaturationsAndTotalMolarDensity(self):
+    def ComputeSaturationsAndTotalMolarDensity(self, maxIter=1000, tol=1e-10):
+        #* Sl, Sg, Ss, RhoTm
         rholM = self.fLiquidPhase.frhoM
         rhogM = self.fGasPhase.frhoM
         rhosM = self.fSolidPhase.frhoM
 
-        Dl = self.fLiquidPhase.fD
-        Dg = self.fGasPhase.fD
-        Ds = self.fSolidPhase.fD
+        Dl, Dg, Ds = self.GetD()
 
         A = np.array([
-            [-rholM, -rhogM, -rhosM, 1.0],
-            [-rholM, 0.0, 0.0, Dl],
-            [0.0, 0.0, -rhosM, Ds],
+            [rholM, 0.0, 0.0, -Dl],
+            [0.0, rhogM, 0.0, -Dg],
+            [0.0, 0.0, rhosM, -Ds],
             [1.0, 1.0, 1.0, 0.0],
         ])
 
-        R = np.array([0.0, 0.0, 0.0, 1.0])
+        def residual():
+            Sl, Sg, Ss, RhoTm = self.GetSRhoM()
+            Dl, Dg, Ds = self.GetD()
 
-        try:
-            result = np.linalg.solve(A, R)
-        except np.linalg.LinAlgError as exc:
-            raise RuntimeError(
-                "Singular matrix in saturation calculation"
-            ) from exc
+            return np.array([
+                rholM * Sl - Dl * RhoTm,
+                rhogM * Sg - Dg * RhoTm,
+                rhosM * Ss - Ds * RhoTm,
+                Sl + Sg + Ss - 1.0,
+            ])
 
-        self.fLiquidPhase.fS = result[0]
-        self.fGasPhase.fS = result[1]
-        self.fSolidPhase.fS = result[2]
-        self.frhoMT = result[3]
+        for _ in range(maxIter):
+            R = residual()
+            if norm(R) < tol:
+                break
 
-        self.fLiquidPhase.ValidateS()
-        self.fGasPhase.ValidateS()
-        self.fSolidPhase.ValidateS()
+            try:
+                correction = np.linalg.solve(A, -R)
+            except np.linalg.LinAlgError as exc:
+                raise RuntimeError("Singular matrix in ComputeSaturationsAndTotalMolarDensity") from exc
+
+            self.SetSRhoM(self.GetSRhoM() + correction)
+
+        for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
+            phase.ValidateS()
 
         if self.frhoMT < 0.0:
             debug_stop("Negative total molar density")
 
         # Derivatives of saturations and total molar density.
         DD = self.GetDD()
+        SRhoM = self.GetSRhoM()
 
         for i in range(5):
-            dA = np.zeros((4, 4))
-            dA[1, 3] = -DD[0, i]
-            dA[2, 3] = -DD[2, i]
+            dR = np.zeros(4)
 
-            temp = dA @ result
-            temp = np.linalg.solve(A, temp)
+            dR[0] = -SRhoM[3] * DD[0, i]
+            dR[1] = -SRhoM[3] * DD[1, i]
+            dR[2] = -SRhoM[3] * DD[2, i]
 
-            self.fLiquidPhase.fDS[i] = temp[0]
-            self.fGasPhase.fDS[i] = temp[1]
-            self.fSolidPhase.fDS[i] = temp[2]
-            self.fDrhoMT[i] = temp[3]
+            Result = np.linalg.solve(A, -dR)
+
+            self.fLiquidPhase.fDS[i] = Result[0]
+            self.fGasPhase.fDS[i] = Result[1]
+            self.fSolidPhase.fDS[i] = Result[2]
+            self.fDrhoMT[i] = Result[3]
 
     def ValidateXDerivative(self, Val, dVal):
         Val = np.asarray(Val, dtype=float)
@@ -525,6 +561,19 @@ class Compositional_H2O_CO2_NaCl:
         GradK = np.column_stack((dKdP, dKdT))
 
         return K, GradK
+
+    def LoadK(self, P, T):
+        self.fP = P
+        self.fT = T
+        K, gradK = self.CalculateKAndDerivatives()
+
+        GradKCO2 = np.array(gradK[0])
+        GradKH2O = np.array(gradK[1])
+        GradKNaCl = np.array([0.0, 0.0])
+
+        self.fCO2.SetK(K[0], GradKCO2, False)
+        self.fH2O.SetK(K[1], GradKH2O, True)
+        self.fNaCl.SetK(1e30, GradKNaCl, False)
 
     def LoadK(self):
         K, gradK = self.CalculateKAndDerivatives()

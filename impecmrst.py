@@ -193,7 +193,6 @@ compositional = Compositional_H2O_CO2_NaCl()
 compositional.SetRhoM(500.0, 30000.0, 1000.0)
 
 def flash(z, p_pa, T_k, par, eq=None):
-    raise NotImplementedError("flash function should not be called. Use Compositional_H2O_CO2_NaCl class methods instead.")
     """Two-component flash at fixed (p, T).
 
     Because the equilibrium compositions depend only on (p, T), the phase
