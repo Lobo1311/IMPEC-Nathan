@@ -119,9 +119,12 @@ def Run():
 
 def ComparingSpycherPruess():
     from impecmrst import flash, spycher_pruess_eq, Params
+
+    molecular_densities = [[21110, 55500], [33.18, 44.6]] # * row phase, column component
+
     params = Params()
-    #z_co2 = 1e-12
-    z_co2 = 0.4
+    z_co2 = 1e-12
+    #z_co2 = 0.4
     z_h2o = 1.0 - z_co2
     z_nacl = 0.0
     V_impec, Sl_impec, Sg_impec, x_l_co2_impec, x_g_co2_impec, rho_l_molar_impec, rho_g_molar_impec = flash(z_co2, params.p_res, params.T_K, params)
@@ -137,7 +140,9 @@ def ComparingSpycherPruess():
     compositional.fT = params.T_K
     compositional.SetX([x_co2_l, x_co2_g, x_h2o_l, x_h2o_g, x_nacl_l, x_nacl_s])
     compositional.SetZ(z_co2, z_h2o, z_nacl)
-    compositional.SetRhoM(1600.0, 1000.0, 2000.0)
+
+    #compositional.SetRhoM(55395.5814, 14442.832, 2000.0)
+    #compositional.SetRhoM(54285.70927486805, 14442.832777413587, 2000.0)
 
     compositional.ComputeMolarDensityFractions()
     compositional.ComputeSaturationsAndTotalMolarDensity()
@@ -148,8 +153,8 @@ def ComparingSpycherPruess():
     npt.assert_almost_equal(Sg_impec, compositional.fGasPhase.fS, 5, "Gas saturation mismatch")
     npt.assert_almost_equal(x_l_co2_impec, compositional.fCO2.fx[0], 5, "Liquid CO2 mole fraction mismatch")
     npt.assert_almost_equal(x_g_co2_impec, compositional.fCO2.fx[1], 5, "Gas CO2 mole fraction mismatch")
-    #npt.assert_almost_equal(rho_l_molar_impec, compositional.fLiquidPhase.frhoM, 5, "Liquid molar density mismatch")
-    #npt.assert_almost_equal(rho_g_molar_impec, compositional.fGasPhase.frhoM, 5, "Gas molar density mismatch")
+    npt.assert_almost_equal(rho_l_molar_impec, compositional.fLiquidPhase.frhoM, 1, "Liquid molar density mismatch")
+    npt.assert_almost_equal(rho_g_molar_impec, compositional.fGasPhase.frhoM, 1, "Gas molar density mismatch")
 
 if __name__ == "__main__":
     ComparingSpycherPruess()

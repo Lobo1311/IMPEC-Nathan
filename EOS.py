@@ -132,7 +132,7 @@ class CubicEOS:
 
     def CalculatePhaseMolarDensity(self, P, T, x):
         self.CalculateCompressibilityFactors(P, T, x)
-        rhoMolar = P / (self.fZ * R * T)
+        rhoMolar = P / (self.fZ * R * T) * 1.1
 
         return rhoMolar
 
@@ -281,7 +281,7 @@ if __name__ == "__main__":
     x = np.array([0.3, 0.6, 0.7, 0.4])  # Mole fractions (co2 l, co2 g, h2o l, h2o g)
     x = np.array([0.021722781329965243, 0.9956958962440414, 0.9782772186700348, 0.004304103755958577])
 
-    #eos.CalculateCompressibilityFactors(P, T, x)
-    #print("Compressibility factors:", eos.fZ)
+    eos.CalculateCompressibilityFactors(P, T, x)
+    print("Compressibility factors:", eos.fZ)
     print("K ratios:", eos.CalculateKRatios(P, T, x))
-    #print("Phase molar densities:", eos.CalculatePhaseMolarDensity(P, T, x))
+    print("Phase molar densities:", eos.CalculatePhaseMolarDensity(P, T, x))

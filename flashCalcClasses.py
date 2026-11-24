@@ -147,6 +147,7 @@ class Compositional_H2O_CO2_NaCl:
 
         self.fEOS = CubicEOS(PengRobinsonParams())
         self.SetX([0.0, 1.0, 1.0, 0.0, 0.0, 1.0])
+        self.SetRhoM(55000, 15000, 37050.0)
 
     def GetComponent(self, ComponentIdx):
         components = {
@@ -376,8 +377,16 @@ class Compositional_H2O_CO2_NaCl:
         for i in range(3):
             self.SetDD(i + 2, inverseA[:, i])
 
-    def ComputeSaturationsAndTotalMolarDensity(self, maxIter=1000, tol=1e-10):
+    def CalculatePhaseMolarDensities(self):
+        xCO2l, xCO2g, xH2Ol, xH2Og, xNaCll, xNaCls = self.GetX()
+        x = np.array([xCO2l, xH2Ol, xCO2g, xH2Og])
+        rholM, rhogM = self.fEOS.CalculatePhaseMolarDensity(self.fP, self.fT, x)
+
+        self.SetRhoM(rholM, rhogM, 37050.0)  # Fixed molar density for solid phase (NaCl)
+
+    def ComputeSaturationsAndTotalMolarDensity(self, maxIter=1000, tol=1e-12):
         #* Sl, Sg, Ss, RhoTm
+        #self.CalculatePhaseMolarDensities()
         rholM = self.fLiquidPhase.frhoM
         rhogM = self.fGasPhase.frhoM
         rhosM = self.fSolidPhase.frhoM
