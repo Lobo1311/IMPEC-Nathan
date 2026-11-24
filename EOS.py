@@ -6,14 +6,26 @@ R = 8.31446261815324 # Universal gas constant in J/(mol*K)
 class CubicEOS:
     def __init__(self, params):
         self.fParams:EOSParams = params
+        self.fn = 2 #* number of components (CO2 and H2O)
+
+        self.faPhase = np.zeros(self.fn) #* EOS parameter a for each phase
+        self.fbPhase = np.zeros(self.fn) #* EOS parameter b for each phase
+        self.faComp = np.zeros(self.fn) #* EOS parameter a for each component
+        self.fbComp = np.zeros(self.fn) #* EOS parameter b for each component\
+        self.faProduct = np.zeros((self.fn, self.fn)) #* EOS parameter a for each component pair
+        self.fA = np.zeros(self.fn) #* dimensionless EOS parameter A for each phase
+        self.fB = np.zeros(self.fn) #* dimensionless EOS parameter B for each phase
+        self.fZ = np.zeros(self.fn) #* compressibility factors for each phase
+
+        self.fUseBinaryParameters = False #* flag to indicate whether to use binary interaction parameters
 
     def CalculateAlpha(self, T):
         self.fParams.CalculateLambda()
-        self.fAlpha = []
+        self.fAlpha = np.zeros(len(self.fParams.fomega))
 
         for i in range(len(self.fParams.fomega)):
             alphaValue = self.fParams.CalculateAlpha(T, i)
-            self.fAlpha.append(alphaValue)
+            self.fAlpha[i] = alphaValue
 
     def CalculateA(self, T, i):
         ac = self.fParams.fOmegaA * R ** 2 * self.fParams.fTc[i] ** self.fParams.fTemperatureExp / self.fParams.fPc[i]
@@ -29,7 +41,9 @@ class CubicEOS:
             return ac * self.fAlpha[i]
 
     def CalculateKij(self, T): #* binary interaction parameter
-        # return np.zeros((2, 2)) 
+        if not self.fUseBinaryParameters:
+            return np.zeros((self.fn, self.fn))
+
         if T < 278 or T > 623:
             raise ValueError("Temperature is out of the valid range for kij calculation (278 K to 623 K).")
 
@@ -44,56 +58,83 @@ class CubicEOS:
 
         return np.array([[0, val], [val, 0]])
 
-    def CalculateKRatios(self, P, T, x):
+    def CalculateLij(self, T):
+        if not self.fUseBinaryParameters:
+            return np.zeros((self.fn, self.fn))
+
+        if T < 278 or T > 623:
+            raise ValueError("Temperature out of valid range.")
+
+        if T < 373:
+            A = 0.27752
+            B = -0.000197
+        else:
+            A = 0.33147
+            B = -0.000436
+
+        val = A + B * T
+
+        return np.array([
+            [0.0, val],
+            [val, 0.0]
+        ])
+
+    def CalculateCompressibilityFactors(self, P, T, x):
         self.CalculateAlpha(T)
         kij = self.CalculateKij(T)
-        KRatios = [] #* xl / xg for each component
-        phiMat = np.zeros((2, 2)) #* fugacity coefficients for each component in each phase
-        xMat = np.array([[x[0], x[2]], [x[1], x[3]]]) #* mole fractions for each component in each phase
-        ZVec = np.zeros(2) #* compressibility factors for each phase
-        aVec = np.zeros(2)
-        bVec = np.zeros(2)
-        AVec = np.zeros(2)
-        BVec = np.zeros(2)
+        lij = self.CalculateLij(T)
 
-        for iPhase in range(2): #* 0 for liquid, 1 for gas
-            aComponent = []
-            bComponent = []
-            for iComp in range(2): #* 0 for CO2, 1 for H2O
-                aComponent.append(self.CalculateA(T, iComp))
-                bComponent.append(self.fParams.fOmegaB * R * self.fParams.fTc[iComp] / self.fParams.fPc[iComp])
+        for iComp in range(self.fn): #* 0 for CO2, 1 for H2O
+            self.faComp[iComp] = self.CalculateA(T, iComp)
+            self.fbComp[iComp] = self.fParams.fOmegaB * R * self.fParams.fTc[iComp] / self.fParams.fPc[iComp]
 
-            aProduct = np.array([[aComponent[0], np.sqrt(aComponent[0] * aComponent[1])],
-                                    [np.sqrt(aComponent[1] * aComponent[0]), aComponent[1]]])
-            xProduct = np.array([[x[2 * iPhase]**2, x[2 * iPhase] * x[2 * iPhase + 1]],
-                                  [x[2 * iPhase + 1] * x[2 * iPhase], x[2 * iPhase + 1]**2]])
-            
-            aPhase = np.sum(np.multiply(np.multiply(aProduct, xProduct), (1 - kij)))
-            bPhase = x[2 * iPhase] * bComponent[0] + x[2 * iPhase + 1] * bComponent[1]
+        self.faProduct = np.sqrt(np.outer(self.faComp, self.faComp))
+        bProduct = 0.5 * (np.add.outer(self.fbComp, self.fbComp))
 
-            aVec[iPhase] = aPhase
-            bVec[iPhase] = bPhase
+        for iPhase in range(self.fn): #* 0 for liquid, 1 for gas
+            xPhase = np.array([x[iPhase], x[iPhase + 2]])
+            xProduct = np.outer(xPhase, xPhase)
+
+            aPhase = np.sum(np.multiply(np.multiply(self.faProduct, xProduct), (1 - kij)))
+            bPhase = np.sum(xProduct * bProduct * (1 - lij))
+
+            self.faPhase[iPhase] = aPhase
+            self.fbPhase[iPhase] = bPhase
 
             APhase = aPhase * P / (R ** 2 * T ** self.fParams.fTemperatureExp)
             BPhase = bPhase * P / (R * T)
 
-            AVec[iPhase] = APhase
-            BVec[iPhase] = BPhase
+            self.fA[iPhase] = APhase
+            self.fB[iPhase] = BPhase
 
-            #* Calculate the fugacity coefficient using the Peng-Robinson EOS
+            #* Calculate the fugacity coefficient using an EOS
             Z = self.SolveCubicEOS(APhase, BPhase, iPhase)
-            ZVec[iPhase] = Z
+            self.fZ[iPhase] = Z    
 
-        for iPhase in range(2):
-            for iComp in range(2):
-                lnphi = self.fParams.CalculateLnPhi(iComp, iPhase, kij, AVec, BVec, aVec, bVec, bComponent, aProduct, xMat, ZVec)
+    def CalculateKRatios(self, P, T, x):
+        self.CalculateCompressibilityFactors(P, T, x)
+        
+        KRatios = [] #* xl / xg for each component
+        phiMat = np.zeros((self.fn, self.fn)) #* fugacity coefficients for each component in each phase
+        xMat = np.array([[x[0], x[2]], [x[1], x[3]]]) #* mole fractions for each component in each phase
+        kij = self.CalculateKij(T)
+
+        for iPhase in range(self.fn):
+            for iComp in range(self.fn):
+                lnphi = self.fParams.CalculateLnPhi(iComp, iPhase, kij, self.fA, self.fB, self.faPhase, self.fbPhase, self.fbComp, self.faProduct, xMat, self.fZ)
                 phi = np.exp(lnphi)
                 phiMat[iPhase, iComp] = phi
             
-        for i in range(2):
+        for i in range(self.fn):
             KRatios.append(phiMat[0, i] / phiMat[1, i])
 
         return KRatios
+
+    def CalculatePhaseMolarDensity(self, P, T, x):
+        self.CalculateCompressibilityFactors(P, T, x)
+        rhoMolar = P / (self.fZ * R * T)
+
+        return rhoMolar
 
     def SolveCubicEOS(self, A, B, i):
         #* Coefficients of the cubic equation: a*Z^3 + b*Z^2 + c*Z + d = 0
@@ -101,7 +142,7 @@ class CubicEOS:
         roots = np.roots(coeffs)
 
         #* Return the real root (the one that corresponds to the physical solution)
-        real_roots = roots[np.isreal(roots)].real
+        real_roots = roots[np.abs(roots.imag) < 1e-8].real
         possible_roots = real_roots[real_roots > B]
 
         if len(possible_roots) == 0:
@@ -133,11 +174,11 @@ class EOSParams(ABC):
         self.fCoeff = CoeffFunc
 
     def CalculateLambda(self):
-        self.fLambda = []
+        self.fLambda = np.zeros(len(self.fomega))
 
-        for omega in self.fomega:
+        for i, omega in enumerate(self.fomega):
             lambdaValue = 0.37464 + 1.5423 * omega - 0.26992 * omega ** 2
-            self.fLambda.append(lambdaValue)
+            self.fLambda[i] = lambdaValue
 
     @abstractmethod
     def CalculateAlpha(self, T, i):
@@ -225,8 +266,22 @@ class RedlichKwongSoaveParams(ModRedlichKwongParams):
         return (1 + self.fLambda[i] * (1 - (T / self.fTc[i]) ** 0.5)) ** 2
 
     def CalculateLambda(self):
-        self.fLambda = []
+        self.fLambda = np.zeros(len(self.fomega))
 
-        for omega in self.fomega:
+        for i, omega in enumerate(self.fomega):
             lambdaValue = 0.48 + 1.574 * omega - 0.176 * omega ** 2
-            self.fLambda.append(lambdaValue)
+            self.fLambda[i] = lambdaValue
+
+if __name__ == "__main__":
+    # Example usage
+    params = PengRobinsonParams()
+    eos = CubicEOS(params)
+    P = 10.0e6  # Pressure in Pa
+    T = 313.15  # Temperature in K
+    x = np.array([0.3, 0.6, 0.7, 0.4])  # Mole fractions (co2 l, co2 g, h2o l, h2o g)
+    x = np.array([0.021722781329965243, 0.9956958962440414, 0.9782772186700348, 0.004304103755958577])
+
+    #eos.CalculateCompressibilityFactors(P, T, x)
+    #print("Compressibility factors:", eos.fZ)
+    print("K ratios:", eos.CalculateKRatios(P, T, x))
+    #print("Phase molar densities:", eos.CalculatePhaseMolarDensity(P, T, x))

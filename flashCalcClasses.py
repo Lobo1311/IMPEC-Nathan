@@ -117,7 +117,7 @@ class Phase:
         self.fDS = np.zeros(5)
         self.fD = 0.0
         self.fDD = np.zeros(5)
-        self.fP = 0.0
+        #self.fP = 0.0
         self.frhoM = 0.0
         self.fDrhoM = np.zeros(2)
 
@@ -423,6 +423,19 @@ class Compositional_H2O_CO2_NaCl:
         elif -1e-6 < self.fSolidPhase.fS < 0.0:
             self.fSolidPhase.fS = 0.0
             self.fLiquidPhase.fS = 1.0 - self.fGasPhase.fS
+
+        if 1.0 < self.fLiquidPhase.fS < 1.0 + 1e-6:
+            self.fLiquidPhase.fS = 1.0
+            self.fGasPhase.fS = 0.0
+            self.fSolidPhase.fS = 0.0
+        elif 1.0 < self.fGasPhase.fS < 1.0 + 1e-6:
+            self.fGasPhase.fS = 1.0
+            self.fLiquidPhase.fS = 0.0
+            self.fSolidPhase.fS = 0.0
+        elif 1.0 < self.fSolidPhase.fS < 1.0 + 1e-6:
+            self.fSolidPhase.fS = 1.0
+            self.fLiquidPhase.fS = 0.0
+            self.fGasPhase.fS = 0.0
 
         for phase in (self.fLiquidPhase, self.fGasPhase, self.fSolidPhase):
             phase.ValidateS()

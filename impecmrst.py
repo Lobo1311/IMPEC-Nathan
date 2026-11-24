@@ -190,7 +190,6 @@ def spycher_pruess_eq(p_pa, T_k, par):
 # =====================================================================
 
 compositional = Compositional_H2O_CO2_NaCl()
-compositional.SetRhoM(500.0, 30000.0, 1000.0)
 
 def flash(z, p_pa, T_k, par, eq=None):
     """Two-component flash at fixed (p, T).
