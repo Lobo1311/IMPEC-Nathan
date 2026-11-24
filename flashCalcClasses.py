@@ -386,7 +386,7 @@ class Compositional_H2O_CO2_NaCl:
 
     def ComputeSaturationsAndTotalMolarDensity(self, maxIter=1000, tol=1e-12):
         #* Sl, Sg, Ss, RhoTm
-        #self.CalculatePhaseMolarDensities()
+        self.CalculatePhaseMolarDensities()
         rholM = self.fLiquidPhase.frhoM
         rhogM = self.fGasPhase.frhoM
         rhosM = self.fSolidPhase.frhoM
@@ -578,6 +578,42 @@ class Compositional_H2O_CO2_NaCl:
         self.ComputeMolarFractions()
         self.ComputeMolarDensityFractions()
         self.ComputeSaturationsAndTotalMolarDensity()
+
+    def ConvergeEOSMolarFractions(self, maxIter=1000, tol=1e-10):
+        self.LoadK()
+
+        for _ in range(maxIter):
+            xOld = self.GetX().copy()
+            KOld = np.array([self.fCO2.fK, self.fH2O.fK])
+
+            KEOS, gradKEOS = self.CalculateKAndDerivatives()
+            KNew = KOld + (KEOS - KOld)
+
+            self.fCO2.SetK(KNew[0], gradKEOS[0], False)
+            self.fH2O.SetK(KNew[1], gradKEOS[1], True)
+            self.fNaCl.SetK(1e30, np.zeros(2), False)
+
+            self.ComputeMolarFractions()
+
+            xNew = self.GetX()
+
+            errorX = norm(xNew - xOld)
+            errorK = norm(KNew - KOld) / (max(norm(KOld), 1.0))
+
+            if errorX < tol and errorK < tol:
+                break
+        else:
+            debug_stop("ConvergeEOSMolarFractions did not converge")
+
+    def FlashCalculationV2(self, P, T, zCO2, zH2O, zNaCl):
+        self.fP = P
+        self.fT = T
+        self.SetZ(zCO2, zH2O, zNaCl)
+
+        self.ConvergeEOSMolarFractions()
+        self.CalculatePhaseMolarDensities()
+        self.ComputeMolarDensityFractions()
+        self.ComputeSaturationsAndTotalMolarDensity() 
 
     def CalculateKAndDerivatives(self, dP=1000.0, dT=0.1):
         def CalculateK(P, T):

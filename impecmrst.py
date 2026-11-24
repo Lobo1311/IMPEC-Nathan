@@ -286,7 +286,7 @@ def relperm(Sw, Sg, par):
 def cell_state(p, N, par, eq=None):
     NT = N.sum()
     z = N[ICO2] / NT
-    compositional.FlashCalculation(p, par.T_K, z, 1.0 - z, 0.0)
+    compositional.FlashCalculationV2(p, par.T_K, z, 1.0 - z, 0.0)
     #V, Sl, Sg, x_l, x_g, rho_l, rho_g = flash(z, p, par.T_K, par, eq)
     #Vt = V * NT / rho_g + (1.0 - V) * NT / rho_l
     Vt = compositional.fGasPhase.fD * NT / compositional.fGasPhase.frhoM + (1.0 - compositional.fGasPhase.fD) * NT / compositional.fLiquidPhase.frhoM
@@ -349,7 +349,7 @@ class Simulator:
         self.N = np.zeros((n, NC))
 
         #st0 = flash(1e-12, par.p_res, par.T_K, par)
-        compositional.FlashCalculation(par.p_res, par.T_K, 1e-12, 1.0 - 1e-12, 0.0)
+        compositional.FlashCalculationV2(par.p_res, par.T_K, 1e-12, 1.0 - 1e-12, 0.0)
         self.N[:, IH2O] = par.phi * compositional.fLiquidPhase.frhoM          # rho_l_molar at z ~ 0
         self.N[:, ICO2] = 0.0
 

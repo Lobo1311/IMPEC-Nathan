@@ -132,7 +132,7 @@ class CubicEOS:
 
     def CalculatePhaseMolarDensity(self, P, T, x):
         self.CalculateCompressibilityFactors(P, T, x)
-        rhoMolar = P / (self.fZ * R * T) * 1.1
+        rhoMolar = P / (self.fZ * R * T)
 
         return rhoMolar
 
